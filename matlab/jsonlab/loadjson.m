@@ -76,7 +76,7 @@ elseif(exist(fname,'file'))
        end
    end
 else
-   error('input file does not exist');
+   error(strcat('input file: "', fname, '" does not exist'));
 end
 
 pos = 1; len = length(string); inStr = string;
