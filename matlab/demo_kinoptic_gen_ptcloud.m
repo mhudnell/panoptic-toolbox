@@ -39,18 +39,27 @@ syncTableFileName = sprintf('%s/%s/ksynctables_%s.json',root_path,seqName,seqNam
 panopcalibFileName = sprintf('%s/%s/calibration_%s.json',root_path,seqName,seqName);
 panopSyncTableFileName = sprintf('%s/%s/synctables_%s.json',root_path,seqName,seqName);
 
+%Visualization parameters
+bVisOutput = 1; %Turn on, if you want to visualize what's going on
+bVisKinect1Intermediates = 0;
+bVisPerKinectReconstructions = 0;
+
+%Other parameters
+bWriteOutput = 1;
+bRemoveFloor= 1;  %Turn on, if you want to remove points from floor
+floorHeightThreshold = 7; % Adjust this (0.5cm ~ 7cm), if floor points are not succesfully removed
+                            % Icreasing this may remove feet of people
+bRemoveWalls = 1; %Turn on, if you want to remove points from dome surface
+
 % Output folder Path
 %Change the following if you want to save outputs on another folder
 plyOutputDir=sprintf('%s/%s/kinoptic_ptclouds',root_path,seqName);
+if bWriteOutput
 mkdir(plyOutputDir);
 disp(sprintf('PLY files will be saved in: %s\',plyOutputDir));
-
-%Other parameters
-bVisOutput = 1; %Turn on, if you want to visualize what's going on
-bRemoveFloor= 1;  %Turn on, if you want to remove points from floor
-floorHeightThreshold = 0.5; % Adjust this (0.5cm ~ 7cm), if floor points are not succesfully removed
-                            % Icreasing this may remove feet of people
-bRemoveWalls = 1; %Turn on, if you want to remove points from dome surface
+else
+    disp(sprintf('PLY files will NOT be saved'));
+end
 
 addpath('jsonlab');
 addpath('kinoptic-tools');
@@ -79,7 +88,7 @@ for hd_index = hd_index_list
 %     if( mod(hd_index_afterOffest,10)~=0)
 %         continue;       %We ALWAYS save every 10th frames.
 %     end
-    out_fileName = sprintf('%s/ptcloud_hd%08d.ply', plyOutputDir, hd_index_afterOffest);
+    out_fileName = sprintf('%s/ptcloud_hd%08d_clipped_float_norms.ply', plyOutputDir, hd_index_afterOffest);
     
 %     if exist(out_fileName,'file')
 %         disp(sprintf('Already exists: %s\n',out_fileName));
@@ -94,11 +103,11 @@ for hd_index = hd_index_list
     %% Main Iteration    
     all_point3d_panopticWorld = []; %point cloud output from all kinects
     all_colorsv = [];   %colors for point cloud 
-
+    all_normals = [];   %normals for point cloud
 
     for idk = 1:10  %Iterating 10 kinects. Change this if you want a subpart
 
-        if idk==1 && bVisOutput   %Visualize the results from the frist kinect only. 
+        if idk==1 && bVisOutput && bVisKinect1Intermediates   %Visualize the results from the frist kinect only. 
             vis_output = 1;
         else
             vis_output = 0;
@@ -126,7 +135,7 @@ for hd_index = hd_index_list
             continue;
         end
 
-        % Extract image and depth
+        %% Extract image and depth
         %rgbim_raw = kdata.vobj{idk}.readIndex(cindex); % cindex: 1 based
         rgbFileName = sprintf('%s/50_%02d/50_%02d_%08d.jpg',kinectImgDir,idk,idk,cindex);
         depthFileName = sprintf('%s/KINECTNODE%d/depthdata.dat',kinectDepthDir,idk);
@@ -212,6 +221,53 @@ for hd_index = hd_index_list
         end
 
 
+        
+        %% Estimate normals -- mh 11.11.19
+        pc = pointCloud(point3d);
+        pc.Color = uint8(round(colorsv*255));
+        normals = pcnormals(pc);
+        
+        % Flip the normal vector if it is not pointing towards the sensor.
+        for k = 1 : size(normals, 1)
+%                p1 = sensorCenter - [x(k),y(k),z(k)];
+%                p2 = [u(k),v(k),w(k)];
+            p1 = sensorCenter - [normals(k,1), normals(k,2), normals(k,3)];
+            p2 = [normals(k,1), normals(k,2), normals(k,3)];
+            angle = atan2(norm(cross(p1,p2)),p1*p2');
+            if angle > pi/2 || angle < -pi/2
+%                    u(k) = -u(k);
+%                    v(k) = -v(k);
+%                    w(k) = -w(k);
+            normals(k,1) = -normals(k,1);
+            normals(k,2) = -normals(k,2);
+            normals(k,3) = -normals(k,3);
+            end
+        end
+        
+        if bVisPerKinectReconstructions && bVisOutput %vis_output
+            pcshow(pc);
+            title(strcat('Estimated Normals for Kinect ', num2str(idk)));
+            hold on
+            
+            % place symbol at camera position
+            plotCamera('Location',[0 0 0],'Size',0.2);
+            hold on
+            
+            % plot every 10th normal
+            x = pc.Location(1:10:end,1);
+            y = pc.Location(1:10:end,2);
+            z = pc.Location(1:10:end,3);
+            u = normals(1:10:end,1);
+            v = normals(1:10:end,2);
+            w = normals(1:10:end,3);
+            
+            quiver3(x,y,z,u,v,w);
+            hold off
+            
+            uiwait;
+        end
+
+
         %% Transform Kinect Local to Panoptic World
 
         % Kinect local coordinate is defined by depth camera coordinate
@@ -248,8 +304,14 @@ for hd_index = hd_index_list
 
         all_point3d_panopticWorld = [all_point3d_panopticWorld; point3d_panopticWorld(validPixIdx,:)];
         all_colorsv = [all_colorsv ; colorsv(validPixIdx,:)];
+        all_normals = [all_normals ; normals(validPixIdx,:)];
 
     end
+
+    
+    %% Convert points from double to float -- mh 11.4.19
+    all_point3d_panopticWorld = single(all_point3d_panopticWorld);
+    %whos all_point3d_panopticWorld
 
     %% Visualize Point Cloud
 %     if bVisOutput
@@ -272,6 +334,7 @@ for hd_index = hd_index_list
         floorPtIdx =(find(all_point3d_panopticWorld(:,2)>-floorHeightThreshold));      %Up-direction => negative Y axis
         all_point3d_panopticWorld(floorPtIdx,:) =[];
         all_colorsv(floorPtIdx,:) =[];
+        all_normals(floorPtIdx,:) =[];
         
         %%Delete floor light
         ptCopy = all_point3d_panopticWorld;
@@ -281,6 +344,7 @@ for hd_index = hd_index_list
         outliers =(find(distFromCenter>225));      %Up-direction => negative Y axis
         all_point3d_panopticWorld(outliers,:) =[];
         all_colorsv(outliers,:) =[];
+        all_normals(outliers,:) =[];
     end
     
     
@@ -290,6 +354,7 @@ for hd_index = hd_index_list
   
     out_pc = pointCloud(all_point3d_panopticWorld);
     out_pc.Color = uint8(round(all_colorsv*255));
+    out_pc.Normal = all_normals;
      
     %% Visualize Point Cloud
     if bVisOutput
@@ -299,8 +364,9 @@ for hd_index = hd_index_list
         view(2);
     end   
     
+    if bWriteOutput
     pcwrite(out_pc,out_fileName,'PLYFormat','ascii');
-    
+    end  
     
     
 end
