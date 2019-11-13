@@ -22,9 +22,9 @@
 % (root_path)/(seqName)/calibration_(seqName).json
 % (root_path)/(seqName)/synctables_(seqName).json
 
-root_path = '[]' %Put your root path where sequence folders are locates
-seqName = '[]'  %Put your target sequence name here
-hd_index_list= 500:500; % Target frames you want to export ply files
+root_path = 'C:\Users\maxhu\etlab\volumetric_capture\panoptic-toolbox' %Put your root path where sequence folders are locates
+seqName = '171026_pose3'  %Put your target sequence name here
+hd_index_list= 380:380; % Target frames you want to export ply files
 
 %The followings are an example
 % root_path = '/posefs0c/panoptic' %An example
@@ -88,7 +88,7 @@ for hd_index = hd_index_list
 %     if( mod(hd_index_afterOffest,10)~=0)
 %         continue;       %We ALWAYS save every 10th frames.
 %     end
-    out_fileName = sprintf('%s/ptcloud_hd%08d_clipped_float_norms.ply', plyOutputDir, hd_index_afterOffest);
+    out_fileName = sprintf('%s/ptcloud_hd%08d_mh2.ply', plyOutputDir, hd_index_afterOffest);
     
 %     if exist(out_fileName,'file')
 %         disp(sprintf('Already exists: %s\n',out_fileName));
@@ -219,55 +219,7 @@ for hd_index = hd_index_list
             title('Pt cloud from Kinect1, after extracting colors');
             view(2);
         end
-
-
-        
-        %% Estimate normals -- mh 11.11.19
-        pc = pointCloud(point3d);
-        pc.Color = uint8(round(colorsv*255));
-        normals = pcnormals(pc);
-        
-        % Flip the normal vector if it is not pointing towards the sensor.
-        for k = 1 : size(normals, 1)
-%                p1 = sensorCenter - [x(k),y(k),z(k)];
-%                p2 = [u(k),v(k),w(k)];
-            p1 = sensorCenter - [normals(k,1), normals(k,2), normals(k,3)];
-            p2 = [normals(k,1), normals(k,2), normals(k,3)];
-            angle = atan2(norm(cross(p1,p2)),p1*p2');
-            if angle > pi/2 || angle < -pi/2
-%                    u(k) = -u(k);
-%                    v(k) = -v(k);
-%                    w(k) = -w(k);
-            normals(k,1) = -normals(k,1);
-            normals(k,2) = -normals(k,2);
-            normals(k,3) = -normals(k,3);
-            end
-        end
-        
-        if bVisPerKinectReconstructions && bVisOutput %vis_output
-            pcshow(pc);
-            title(strcat('Estimated Normals for Kinect ', num2str(idk)));
-            hold on
             
-            % place symbol at camera position
-            plotCamera('Location',[0 0 0],'Size',0.2);
-            hold on
-            
-            % plot every 10th normal
-            x = pc.Location(1:10:end,1);
-            y = pc.Location(1:10:end,2);
-            z = pc.Location(1:10:end,3);
-            u = normals(1:10:end,1);
-            v = normals(1:10:end,2);
-            w = normals(1:10:end,3);
-            
-            quiver3(x,y,z,u,v,w);
-            hold off
-            
-            uiwait;
-        end
-
-
         %% Transform Kinect Local to Panoptic World
 
         % Kinect local coordinate is defined by depth camera coordinate
@@ -301,10 +253,57 @@ for hd_index = hd_index_list
         point3d_panopticWorld = T_kinectLocal2PanopticWorld*[point3d'; ones(1, size(point3d,1))];
         point3d_panopticWorld = point3d_panopticWorld(1:3,:)';
         point3d_panopticWorld = double(point3d_panopticWorld);
-
+        
+        %% Estimate normals -- mh 11.12.19
+        world_pc = pointCloud(point3d_panopticWorld);
+        world_pc.Color = uint8(round(colorsv*255));
+        normals_panopticWorld = pcnormals(world_pc);
+        
+        % sensorCenter in local space is [0,0,0]: must transform to world space
+        sensorCenter = T_kinectLocal2PanopticWorld*[0;0;0;1];
+        sensorCenter = sensorCenter(1:3)';
+        
+        % Flip the normal vector if it is not pointing towards the sensor.
+        for k = 1 : size(normals_panopticWorld, 1)
+            p1 = sensorCenter - [world_pc.Location(k,1), world_pc.Location(k,2), world_pc.Location(k,3)];
+            p2 = [normals_panopticWorld(k,1), normals_panopticWorld(k,2), normals_panopticWorld(k,3)];
+            angle = atan2(norm(cross(p1,p2)),p1*p2');
+            if angle > pi/2 || angle < -pi/2
+                normals_panopticWorld(k,1) = -normals_panopticWorld(k,1);
+                normals_panopticWorld(k,2) = -normals_panopticWorld(k,2);
+                normals_panopticWorld(k,3) = -normals_panopticWorld(k,3);
+            end
+        end
+        world_pc.Normal = normals_panopticWorld;
+        
+        % Visualize panoptic world space
+        if bVisPerKinectReconstructions && bVisOutput
+            pcshow(world_pc);
+            title(strcat('Estimated panoptic World Normals for Kinect ', num2str(idk)));
+            hold on
+            
+            % place symbol at camera position
+            plotCamera('Location',sensorCenter,'Size',2);
+            hold on
+            
+            % plot every 10th normal
+            x = world_pc.Location(1:10:end,1);
+            y = world_pc.Location(1:10:end,2);
+            z = world_pc.Location(1:10:end,3);
+            u = world_pc.Normal(1:10:end,1);
+            v = world_pc.Normal(1:10:end,2);
+            w = world_pc.Normal(1:10:end,3);
+            
+            quiver3(x,y,z,u,v,w);
+            hold off
+            
+            uiwait;
+        end
+        
+        %% Add computed points / normals to world arrays
         all_point3d_panopticWorld = [all_point3d_panopticWorld; point3d_panopticWorld(validPixIdx,:)];
         all_colorsv = [all_colorsv ; colorsv(validPixIdx,:)];
-        all_normals = [all_normals ; normals(validPixIdx,:)];
+        all_normals = [all_normals ; normals_panopticWorld(validPixIdx,:)];
 
     end
 
@@ -361,6 +360,19 @@ for hd_index = hd_index_list
         close all;
         pcshow(out_pc);
         title('Pt cloud from all kinects after filtering');
+        hold on
+        
+        % plot every 10th normal
+        x = out_pc.Location(1:10:end,1);
+        y = out_pc.Location(1:10:end,2);
+        z = out_pc.Location(1:10:end,3);
+        u = out_pc.Normal(1:10:end,1);
+        v = out_pc.Normal(1:10:end,2);
+        w = out_pc.Normal(1:10:end,3);
+
+        quiver3(x,y,z,u,v,w);
+        hold off
+        
         view(2);
     end   
     
