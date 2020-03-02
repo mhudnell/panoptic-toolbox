@@ -24,7 +24,7 @@
 
 root_path = 'C:\Users\maxhu\etlab\volumetric_capture\panoptic-toolbox' %Put your root path where sequence folders are locates
 seqName = '171026_pose3'  %Put your target sequence name here
-hd_index_list= 380:380; % Target frames you want to export ply files
+hd_index_list= 380:400; % Target frames you want to export ply files
 
 %The followings are an example
 % root_path = '/posefs0c/panoptic' %An example
@@ -40,7 +40,7 @@ panopcalibFileName = sprintf('%s/%s/calibration_%s.json',root_path,seqName,seqNa
 panopSyncTableFileName = sprintf('%s/%s/synctables_%s.json',root_path,seqName,seqName);
 
 %Visualization parameters
-bVisOutput = 1; %Turn on, if you want to visualize what's going on
+bVisOutput = 0; %Turn on, if you want to visualize what's going on
 bVisKinect1Intermediates = 0;
 bVisPerKinectReconstructions = 0;
 
@@ -56,7 +56,7 @@ bRemoveWalls = 1; %Turn on, if you want to remove points from dome surface
 plyOutputDir=sprintf('%s/%s/kinoptic_ptclouds',root_path,seqName);
 if bWriteOutput
 mkdir(plyOutputDir);
-disp(sprintf('PLY files will be saved in: %s\',plyOutputDir));
+disp(sprintf('PLY files will be saved in: %s\n',plyOutputDir));
 else
     disp(sprintf('PLY files will NOT be saved'));
 end
@@ -88,7 +88,7 @@ for hd_index = hd_index_list
 %     if( mod(hd_index_afterOffest,10)~=0)
 %         continue;       %We ALWAYS save every 10th frames.
 %     end
-    out_fileName = sprintf('%s/ptcloud_hd%08d_mh2.ply', plyOutputDir, hd_index_afterOffest);
+    out_fileName = sprintf('%s/ptcloud_hd%08d.ply', plyOutputDir, hd_index_afterOffest);
     
 %     if exist(out_fileName,'file')
 %         disp(sprintf('Already exists: %s\n',out_fileName));
